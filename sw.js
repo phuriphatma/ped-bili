@@ -1,5 +1,5 @@
 // Service Worker for offline functionality
-const CACHE_NAME = 'ped-bili-v6';
+const CACHE_NAME = 'ped-bili-v7';
 const STATIC_ASSETS = [
   './',
   './index.html',
