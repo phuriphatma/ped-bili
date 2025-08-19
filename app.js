@@ -110,17 +110,130 @@
 
   // Chart removed; keep datasets builder for parsing only.
 
-  function computeSummary(){
+  // PediTools 2022 API integration functions
+  async function checkInternetConnectivity() {
+    try {
+      // Use a lightweight request to check connectivity
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      
+      const response = await fetch('https://peditools.org/bili2022/api/?ga=40&age=48', {
+        method: 'HEAD',
+        signal: controller.signal,
+        mode: 'cors'
+      });
+      
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function callPediToolsAPI(ga, age, bili, risk) {
+    try {
+      const params = new URLSearchParams();
+      params.append('ga', ga.toString());
+      params.append('age', age.toString());
+      
+      if (typeof bili === 'number' && isFinite(bili)) {
+        params.append('bili', bili.toString());
+      }
+      
+      // Map risk values to API format
+      let riskParam = 'both'; // default
+      if (risk === 'no_risk') riskParam = 'none';
+      else if (risk === 'any_risk') riskParam = 'any';
+      else if (risk === 'both') riskParam = 'both';
+      params.append('risk', riskParam);
+      
+      // Set plotchoice to peditools and plotscale to auto
+      params.append('plotchoice', 'peditools');
+      params.append('plotscale', 'auto');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      const response = await fetch(`https://peditools.org/bili2022/api/?${params.toString()}`, {
+        method: 'GET',
+        signal: controller.signal,
+        mode: 'cors'
+      });
+
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`API responded with status: ${response.status}`);
+      }
+
+      const html = await response.text();
+      return parseAPIResponse(html);
+    } catch (error) {
+      console.warn('PediTools API call failed:', error);
+      return null;
+    }
+  }
+
+  function parseAPIResponse(html) {
+    try {
+      // Create a temporary DOM element to parse the HTML
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      
+      // Extract threshold information from the response
+      // Look for phototherapy and exchange thresholds in the HTML content
+      const result = {
+        phototherapy: null,
+        exchange: null,
+        recommendation: null,
+        rateOfRise: null
+      };
+
+      // Try to extract thresholds from text content
+      const textContent = doc.body ? doc.body.textContent : html;
+      
+      // Look for phototherapy threshold patterns like "Phototherapy: XX.X mg/dL"
+      const ptMatch = textContent.match(/phototherapy[:\s]+(\d+\.?\d*)\s*mg\/dL/i);
+      if (ptMatch) {
+        result.phototherapy = parseFloat(ptMatch[1]);
+      }
+      
+      // Look for exchange threshold patterns like "Exchange: XX.X mg/dL"
+      const exMatch = textContent.match(/exchange[:\s]+(\d+\.?\d*)\s*mg\/dL/i);
+      if (exMatch) {
+        result.exchange = parseFloat(exMatch[1]);
+      }
+
+      // Look for recommendation text
+      const recMatch = textContent.match(/(no treatment|phototherapy|exchange transfusion)/i);
+      if (recMatch) {
+        result.recommendation = recMatch[1];
+      }
+
+      // Look for rate of rise information
+      const rateMatch = textContent.match(/rate[:\s]+(\d+\.?\d*)\s*mg\/dL\/hr/i);
+      if (rateMatch) {
+        result.rateOfRise = parseFloat(rateMatch[1]);
+      }
+
+      return result;
+    } catch (error) {
+      console.warn('Failed to parse API response:', error);
+      return null;
+    }
+  }
+
+  async function computeSummary(){
     const { ga, risk, ageHoursList, biliList } = buildDatasets();
     const age = ageHoursList[ageHoursList.length-1];
     const bili = biliList[biliList.length-1];
 
-  let rec = DemoThresholds.recommendation({ age, bili, ga, risk });
-  const hasBili = (typeof bili === 'number' && isFinite(bili));
+    let rec = DemoThresholds.recommendation({ age, bili, ga, risk });
+    const hasBili = (typeof bili === 'number' && isFinite(bili));
 
-  // If any-risk selected, show AAP exchange for that GA as authoritative overlay
-  let aapEx = null;
-  let aapExactText = 'hi';
+    // If any-risk selected, show AAP exchange for that GA as authoritative overlay
+    let aapEx = null;
+    let aapExactText = 'hi';
     if(risk !== 'no_risk' && window.AAP_AnyRisk_Exchange){
       if(typeof age === 'number' && !isNaN(age)){
         const exact = window.AAP_AnyRisk_Exchange.getExchangeExact(ga, age);
@@ -144,7 +257,7 @@
     }
 
     // Phototherapy exact, if table present
-  let aapPt = null;
+    let aapPt = null;
     if(risk !== 'no_risk' && window.AAP_AnyRisk_Phototherapy){
       if(typeof age === 'number' && !isNaN(age)){
         const exactPt = window.AAP_AnyRisk_Phototherapy.getPhotoExact(ga, age);
@@ -152,39 +265,97 @@
       }
     }
 
-  // Build primary threshold header
-  let headerHtml = '';
-  if(aapPt != null && aapEx != null){
-    headerHtml = `<div class="primary-threshold">(${aapPt}, ${aapEx}) mg/dL</div>`;
-  } else if(aapPt != null){
-    headerHtml = `<div class="primary-threshold">${aapPt} mg/dL</div>`;
-  } else if(aapEx != null){
-    headerHtml = `<div class="primary-threshold">${aapEx} mg/dL</div>`;
+    // Try to get PediTools API data if internet is available and we have required data
+    let apiResult = null;
+    let apiStatus = '';
+    if(typeof ga === 'number' && typeof age === 'number' && !isNaN(ga) && !isNaN(age)){
+      try {
+        const isOnline = await checkInternetConnectivity();
+        if(isOnline){
+          apiStatus = 'Checking PediTools API...';
+          updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus);
+          
+          apiResult = await callPediToolsAPI(ga, age, bili, risk);
+          if(apiResult){
+            apiStatus = 'PediTools API data available';
+          } else {
+            apiStatus = 'PediTools API unavailable';
+          }
+        } else {
+          apiStatus = 'Offline - API unavailable';
+        }
+      } catch (error) {
+        apiStatus = 'API check failed';
+        console.warn('API connectivity check failed:', error);
+      }
+    } else {
+      apiStatus = 'Insufficient data for API call';
+    }
+
+    updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus);
   }
 
-  // Meta line under header
-  const metaParts = [];
-  metaParts.push(`<strong>GA:</strong> ${ga} wks`);
-  if(typeof age !== 'undefined') metaParts.push(`<strong>Age:</strong> ${age} h`);
-  const riskText = risk.replace('_',' ');
-  metaParts.push(`<span class="muted"><strong>Risk:</strong> ${riskText}</span>`);
-  const metaHtml = `<div class="secondary-meta">${metaParts.join(' · ')}</div>`;
+  function updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus) {
+    // Build primary threshold header (local data)
+    let finalHeaderHtml = '';
+    if(aapPt != null && aapEx != null){
+      finalHeaderHtml = `<div class="primary-threshold">(${aapPt}, ${aapEx}) mg/dL</div>`;
+    } else if(aapPt != null){
+      finalHeaderHtml = `<div class="primary-threshold">${aapPt} mg/dL</div>`;
+    } else if(aapEx != null){
+      finalHeaderHtml = `<div class="primary-threshold">${aapEx} mg/dL</div>`;
+    }
 
-  const details = [];
-  if(hasBili) details.push(`<div><strong>Patient TSB:</strong> ${bili} mg/dL</div>`);
-  // Prefer AAP exchange determination if applicable
+    // Meta line under header
+    const metaParts = [];
+    metaParts.push(`<strong>GA:</strong> ${ga} wks`);
+    if(typeof age !== 'undefined') metaParts.push(`<strong>Age:</strong> ${age} h`);
+    const riskText = risk.replace('_',' ');
+    metaParts.push(`<span class="muted"><strong>Risk:</strong> ${riskText}</span>`);
+    const metaHtml = `<div class="secondary-meta">${metaParts.join(' · ')}</div>`;
+
+    const summaryDetails = [];
+    if(hasBili) summaryDetails.push(`<div><strong>Patient TSB:</strong> ${bili} mg/dL</div>`);
+    
+    // Prefer AAP exchange determination if applicable
     if(aapEx != null && hasBili){
       if(bili >= aapEx){
         rec = { level: 'Exchange threshold or higher (AAP any risk)', detail: rec.detail, pt: rec.pt, ex: aapEx };
       }
     }
     if(hasBili){
-      details.push(`<div><strong>Assessment:</strong> ${rec.level}</div>`);
-      if(rec.pt) details.push(`<div class="small muted">Demo phototherapy ~ ${rec.pt} mg/dL; demo exchange ~ ${rec.ex} mg/dL</div>`);
+      summaryDetails.push(`<div><strong>Assessment:</strong> ${rec.level}</div>`);
+      if(rec.pt) summaryDetails.push(`<div class="small muted">Demo phototherapy ~ ${rec.pt} mg/dL; demo exchange ~ ${rec.ex} mg/dL</div>`);
     }
 
+    // Add PediTools API section if available
+    if(apiResult && (apiResult.phototherapy || apiResult.exchange || apiResult.recommendation)) {
+      summaryDetails.push(`<hr/>`);
+      summaryDetails.push(`<div class="api-section"><strong>PediTools 2022 API Results:</strong></div>`);
+      
+      if(apiResult.phototherapy && apiResult.exchange) {
+        summaryDetails.push(`<div class="api-thresholds">Phototherapy: ${apiResult.phototherapy} mg/dL | Exchange: ${apiResult.exchange} mg/dL</div>`);
+      } else if(apiResult.phototherapy) {
+        summaryDetails.push(`<div class="api-thresholds">Phototherapy: ${apiResult.phototherapy} mg/dL</div>`);
+      } else if(apiResult.exchange) {
+        summaryDetails.push(`<div class="api-thresholds">Exchange: ${apiResult.exchange} mg/dL</div>`);
+      }
+      
+      if(apiResult.recommendation) {
+        summaryDetails.push(`<div class="api-recommendation">Recommendation: ${apiResult.recommendation}</div>`);
+      }
+      
+      if(apiResult.rateOfRise) {
+        summaryDetails.push(`<div class="small muted">Rate of rise: ${apiResult.rateOfRise} mg/dL/hr</div>`);
+      }
+    }
+    
+    // Add API status
+    if(apiStatus) {
+      summaryDetails.push(`<div class="small muted api-status">${apiStatus}</div>`);
+    }
 
-    $('#summary').innerHTML = [headerHtml, metaHtml, ...details].filter(Boolean).join('');
+    $('#summary').innerHTML = [finalHeaderHtml, metaHtml, ...summaryDetails].filter(Boolean).join('');
   }
 
   // PDF export removed
