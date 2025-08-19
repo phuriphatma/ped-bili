@@ -29,3 +29,13 @@ button[type="reset"]:hover{background:#475569}
 .secondary-meta{font-size:1rem;color:#475569;margin:.1rem 0}
 .muted{color:#64748b}
 .small{font-size:.9rem}
+
+/* PediTools API styling */
+.api-section{font-weight:600;color:#059669;margin:.5rem 0 .25rem}
+.api-thresholds{font-weight:600;color:#0ea5e9;margin:.25rem 0}
+.api-recommendation{font-weight:600;color:#dc2626;margin:.25rem 0}
+.api-status{font-style:italic;color:#64748b;margin-top:.5rem}
+.api-status.api-success{color:#059669}
+.api-status.api-loading{color:#0ea5e9}
+.api-status.api-error{color:#dc2626}
+hr{border:none;border-top:1px solid #e2e8f0;margin:.75rem 0}
