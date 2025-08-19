@@ -113,19 +113,40 @@
   // PediTools 2022 API integration functions
   async function checkInternetConnectivity() {
     try {
-      // Use a lightweight request to check connectivity
+      // Method 1: Try a lightweight GET request with minimal parameters
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
-      const response = await fetch('https://peditools.org/bili2022/api/?ga=40&age=48', {
-        method: 'HEAD',
+      const response = await fetch('https://peditools.org/bili2022/api/?ga=40&age=48&bili=10&risk=any&plotchoice=peditools&plotscale=auto', {
+        method: 'GET',
         signal: controller.signal,
         mode: 'cors'
       });
       
       clearTimeout(timeoutId);
-      return response.ok;
+      
+      if (response.ok) {
+        return true;
+      }
     } catch (error) {
+      console.warn('Primary connectivity check failed:', error);
+    }
+
+    try {
+      // Method 2: Try with different parameters as fallback
+      const controller2 = new AbortController();
+      const timeoutId2 = setTimeout(() => controller2.abort(), 5000);
+      
+      const response2 = await fetch('https://peditools.org/bili2022/api/?ga=38&age=24&risk=none', {
+        method: 'GET',
+        signal: controller2.signal,
+        mode: 'cors'
+      });
+      
+      clearTimeout(timeoutId2);
+      return response2.ok;
+    } catch (error) {
+      console.warn('Fallback connectivity check failed:', error);
       return false;
     }
   }
@@ -152,21 +173,29 @@
       params.append('plotscale', 'auto');
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased timeout to 15 seconds
 
-      const response = await fetch(`https://peditools.org/bili2022/api/?${params.toString()}`, {
+      const apiUrl = `https://peditools.org/bili2022/api/?${params.toString()}`;
+      console.log('Calling PediTools API:', apiUrl);
+
+      const response = await fetch(apiUrl, {
         method: 'GET',
         signal: controller.signal,
-        mode: 'cors'
+        mode: 'cors',
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        }
       });
 
       clearTimeout(timeoutId);
       
       if (!response.ok) {
-        throw new Error(`API responded with status: ${response.status}`);
+        console.warn(`API responded with status: ${response.status} ${response.statusText}`);
+        return null;
       }
 
       const html = await response.text();
+      console.log('API response received, length:', html.length);
       return parseAPIResponse(html);
     } catch (error) {
       console.warn('PediTools API call failed:', error);
@@ -191,29 +220,52 @@
 
       // Try to extract thresholds from text content
       const textContent = doc.body ? doc.body.textContent : html;
+      console.log('Parsing API response, text length:', textContent.length);
       
       // Look for phototherapy threshold patterns like "Phototherapy: XX.X mg/dL"
       const ptMatch = textContent.match(/phototherapy[:\s]+(\d+\.?\d*)\s*mg\/dL/i);
       if (ptMatch) {
         result.phototherapy = parseFloat(ptMatch[1]);
+        console.log('Found phototherapy threshold:', result.phototherapy);
       }
       
       // Look for exchange threshold patterns like "Exchange: XX.X mg/dL"
       const exMatch = textContent.match(/exchange[:\s]+(\d+\.?\d*)\s*mg\/dL/i);
       if (exMatch) {
         result.exchange = parseFloat(exMatch[1]);
+        console.log('Found exchange threshold:', result.exchange);
       }
 
       // Look for recommendation text
       const recMatch = textContent.match(/(no treatment|phototherapy|exchange transfusion)/i);
       if (recMatch) {
         result.recommendation = recMatch[1];
+        console.log('Found recommendation:', result.recommendation);
       }
 
       // Look for rate of rise information
       const rateMatch = textContent.match(/rate[:\s]+(\d+\.?\d*)\s*mg\/dL\/hr/i);
       if (rateMatch) {
         result.rateOfRise = parseFloat(rateMatch[1]);
+        console.log('Found rate of rise:', result.rateOfRise);
+      }
+
+      // If we didn't find any meaningful data, try alternative parsing approaches
+      if (!result.phototherapy && !result.exchange && !result.recommendation) {
+        console.log('No standard patterns found, trying alternative parsing...');
+        
+        // Look for table data or other structured content
+        const tables = doc.querySelectorAll('table, .result, .recommendation, .threshold');
+        for (const table of tables) {
+          const tableText = table.textContent;
+          console.log('Checking table/result element:', tableText.substring(0, 100));
+          
+          // Try to extract numbers that might be thresholds
+          const numbers = tableText.match(/\d+\.?\d*/g);
+          if (numbers && numbers.length > 0) {
+            console.log('Found numbers in result element:', numbers);
+          }
+        }
       }
 
       return result;
@@ -270,26 +322,26 @@
     let apiStatus = '';
     if(typeof ga === 'number' && typeof age === 'number' && !isNaN(ga) && !isNaN(age)){
       try {
+        apiStatus = 'Checking PediTools API...';
+        updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus);
+        
         const isOnline = await checkInternetConnectivity();
         if(isOnline){
-          apiStatus = 'Checking PediTools API...';
-          updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus);
-          
           apiResult = await callPediToolsAPI(ga, age, bili, risk);
-          if(apiResult){
+          if(apiResult && (apiResult.phototherapy || apiResult.exchange || apiResult.recommendation)){
             apiStatus = 'PediTools API data available';
           } else {
-            apiStatus = 'PediTools API unavailable';
+            apiStatus = 'PediTools API returned no data';
           }
         } else {
           apiStatus = 'Offline - API unavailable';
         }
       } catch (error) {
-        apiStatus = 'API check failed';
+        apiStatus = 'API connection failed';
         console.warn('API connectivity check failed:', error);
       }
     } else {
-      apiStatus = 'Insufficient data for API call';
+      apiStatus = 'Enter age and GA to enable API check';
     }
 
     updateSummaryDisplay(ga, age, risk, rec, aapPt, aapEx, hasBili, bili, apiResult, apiStatus);
@@ -350,9 +402,14 @@
       }
     }
     
-    // Add API status
+    // Add API status with more detailed information
     if(apiStatus) {
-      summaryDetails.push(`<div class="small muted api-status">${apiStatus}</div>`);
+      let statusClass = 'api-status';
+      if(apiStatus.includes('available')) statusClass += ' api-success';
+      else if(apiStatus.includes('Checking')) statusClass += ' api-loading';
+      else if(apiStatus.includes('Offline') || apiStatus.includes('failed')) statusClass += ' api-error';
+      
+      summaryDetails.push(`<div class="small muted ${statusClass}">${apiStatus}</div>`);
     }
 
     $('#summary').innerHTML = [finalHeaderHtml, metaHtml, ...summaryDetails].filter(Boolean).join('');
