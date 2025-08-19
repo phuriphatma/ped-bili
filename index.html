@@ -12,7 +12,7 @@
 <body>
   <header>
     <h1>AAP 2022 Hyperbilirubinemia Management Guidelines</h1>
-    <p class="disclaimer">For demonstration only, inspired by https://peditools.org/bili2022/</p>
+    <p class="disclaimer">For demonstration only, inspired by https://peditools.org/bili2022/ <small>(v3.0 - Cache Update Fix)</small></p>
   </header>
 
   <main>
@@ -146,12 +146,39 @@
   <script src="app.js"></script>
   
   <script>
-    // Register Service Worker for offline functionality
+    // Register Service Worker for offline functionality with update handling
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
+        navigator.serviceWorker.register('./sw.js', {
+          updateViaCache: 'none' // Always check for SW updates
+        })
           .then((registration) => {
             console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            
+            // Check for updates immediately and periodically
+            registration.addEventListener('updatefound', () => {
+              console.log('ServiceWorker update found');
+              const newWorker = registration.installing;
+              
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'activated') {
+                  console.log('ServiceWorker activated, reloading page');
+                  // Automatically reload to get the latest version
+                  window.location.reload();
+                }
+              });
+            });
+            
+            // Check for updates every 5 minutes
+            setInterval(() => {
+              console.log('Checking for ServiceWorker updates');
+              registration.update();
+            }, 5 * 60 * 1000);
+            
+            // Also check for updates on page focus
+            window.addEventListener('focus', () => {
+              registration.update();
+            });
           })
           .catch((error) => {
             console.log('ServiceWorker registration failed: ', error);

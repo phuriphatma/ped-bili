@@ -1,5 +1,5 @@
 // Service Worker for offline functionality
-const CACHE_NAME = 'ped-bili-v2';
+const CACHE_NAME = 'ped-bili-v3';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -52,46 +52,81 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache first, then network
+// Fetch event - use network-first for HTML, cache-first for static assets
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request)
-      .then((cachedResponse) => {
-        if (cachedResponse) {
-          console.log('Service Worker: Serving from cache', event.request.url);
-          return cachedResponse;
-        }
-        
-        // Not in cache, fetch from network
-        console.log('Service Worker: Fetching from network', event.request.url);
-        return fetch(event.request)
-          .then((networkResponse) => {
-            // Don't cache non-successful responses
-            if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-              return networkResponse;
-            }
+  const url = new URL(event.request.url);
+  const isHTMLRequest = event.request.destination === 'document' || 
+                       url.pathname === '/' || 
+                       url.pathname.endsWith('.html') || 
+                       url.pathname.endsWith('/');
 
-            // Clone the response as it can only be consumed once
+  if (isHTMLRequest) {
+    // Network-first strategy for HTML to ensure updates
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            console.log('Service Worker: Serving HTML from network', event.request.url);
+            
+            // Cache the fresh HTML response
             const responseToCache = networkResponse.clone();
-
-            // Add to cache for future use
             caches.open(CACHE_NAME)
               .then((cache) => {
                 cache.put(event.request, responseToCache);
               });
-
+            
             return networkResponse;
-          })
-          .catch((error) => {
-            console.error('Service Worker: Network fetch failed', error);
-            // Could return a custom offline page here
-            throw error;
-          });
-      })
-  );
+          }
+          throw new Error('Network response not ok');
+        })
+        .catch((error) => {
+          console.log('Service Worker: Network failed, trying cache for HTML', event.request.url);
+          return caches.match(event.request)
+            .then((cachedResponse) => {
+              return cachedResponse || Response.error();
+            });
+        })
+    );
+  } else {
+    // Cache-first strategy for static assets
+    event.respondWith(
+      caches.match(event.request)
+        .then((cachedResponse) => {
+          if (cachedResponse) {
+            console.log('Service Worker: Serving from cache', event.request.url);
+            return cachedResponse;
+          }
+          
+          // Not in cache, fetch from network
+          console.log('Service Worker: Fetching from network', event.request.url);
+          return fetch(event.request)
+            .then((networkResponse) => {
+              // Don't cache non-successful responses
+              if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+                return networkResponse;
+              }
+
+              // Clone the response as it can only be consumed once
+              const responseToCache = networkResponse.clone();
+
+              // Add to cache for future use
+              caches.open(CACHE_NAME)
+                .then((cache) => {
+                  cache.put(event.request, responseToCache);
+                });
+
+              return networkResponse;
+            })
+            .catch((error) => {
+              console.error('Service Worker: Network fetch failed', error);
+              throw error;
+            });
+        })
+    );
+  }
 });
