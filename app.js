@@ -112,44 +112,52 @@
 
   // PediTools 2022 API integration functions
   async function checkInternetConnectivity() {
-    try {
-      // Method 1: Try a lightweight GET request with minimal parameters
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-      
-      const response = await fetch('https://peditools.org/bili2022/api/?ga=40&age=48&bili=10&risk=any&plotchoice=peditools&plotscale=auto', {
-        method: 'GET',
-        signal: controller.signal,
-        mode: 'cors'
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        return true;
-      }
-    } catch (error) {
-      console.warn('Primary connectivity check failed:', error);
+  const statusEl = document.getElementById("api-status");
+  const resultEl = document.getElementById("api-result");
+  const testUrl = "https://peditools.org/bili2022/api/?ga=40&age=48&bili=10&risk=any";
+
+  try {
+    const response = await fetch(testUrl, {
+      headers: { "Accept": "application/json" }
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned status ${response.status}`);
     }
 
-    try {
-      // Method 2: Try with different parameters as fallback
-      const controller2 = new AbortController();
-      const timeoutId2 = setTimeout(() => controller2.abort(), 5000);
-      
-      const response2 = await fetch('https://peditools.org/bili2022/api/?ga=38&age=24&risk=none', {
-        method: 'GET',
-        signal: controller2.signal,
-        mode: 'cors'
-      });
-      
-      clearTimeout(timeoutId2);
-      return response2.ok;
-    } catch (error) {
-      console.warn('Fallback connectivity check failed:', error);
-      return false;
-    }
+    const data = await response.json();
+
+    console.log("✅ PediTools API online. Sample response:", data);
+    apiStatus = "Online";
+
+    // Update UI
+    statusEl.textContent = "🟢 API Online";
+    statusEl.style.color = "green";
+
+    // Interpret JSON
+    const input = data.input;
+    const assessment = data.assessment;
+
+    resultEl.textContent =
+      `Gestational Age: ${input.ga} weeks\n` +
+      `Age: ${input.age} hrs\n` +
+      `Bilirubin: ${input.bili} mg/dL\n` +
+      `Risk: ${input.risk}\n\n` +
+      `Phototherapy Threshold: ${assessment.phototherapy_threshold} mg/dL\n` +
+      `Exchange Threshold: ${assessment.exchange_threshold} mg/dL\n` +
+      `Treatment Recommendation: ${assessment.treatment}`;
+
+  } catch (error) {
+    console.error("❌ PediTools API unavailable:", error);
+    apiStatus = "Offline – API unavailable";
+
+    // Update UI
+    statusEl.textContent = "🔴 API Offline";
+    statusEl.style.color = "red";
+
+    resultEl.textContent = "No results available (API offline).";
   }
+}
 
   async function callPediToolsAPI(ga, age, bili, risk) {
     try {
@@ -623,5 +631,6 @@
   loadFormData();
   computeSummary();
 })();
+
 
 
