@@ -13,6 +13,11 @@
   <header>
     <h1>AAP 2022 Hyperbilirubinemia Management Guidelines</h1>
     <p class="disclaimer">For demonstration only, inspired by https://peditools.org/bili2022/</p>
+    <div style="margin-top: 10px;">
+      <button onclick="forceRefreshCache()" style="background: #0ea5e9; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+        🔄 Refresh Cache
+      </button>
+    </div>
   </header>
 
   <main>
@@ -146,19 +151,112 @@
   <script src="app.js"></script>
   
   <script>
+    // Service Worker registration and cache management
+    let serviceWorkerRegistration = null;
+    
     // Register Service Worker for offline functionality
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
           .then((registration) => {
+            serviceWorkerRegistration = registration;
             console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            
+            // Listen for service worker updates
+            registration.addEventListener('updatefound', () => {
+              const newWorker = registration.installing;
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New service worker is available
+                  showUpdateNotification();
+                }
+              });
+            });
           })
           .catch((error) => {
             console.log('ServiceWorker registration failed: ', error);
           });
+          
+        // Listen for messages from service worker
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data && event.data.type === 'CACHE_REFRESHED') {
+            console.log('Cache refreshed:', event.data.message);
+            showRefreshNotification('Cache updated successfully!');
+          }
+        });
       });
     } else {
       console.log('ServiceWorker is not supported in this browser.');
+    }
+    
+    // Function to force cache refresh
+    function forceRefreshCache() {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'FORCE_CACHE_REFRESH'
+        });
+        showRefreshNotification('Refreshing cache...');
+      }
+    }
+    
+    // Show update notification
+    function showUpdateNotification() {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #0ea5e9;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+        max-width: 300px;
+      `;
+      notification.innerHTML = `
+        <div>New version available!</div>
+        <button onclick="refreshApp()" style="margin-top: 10px; background: white; color: #0ea5e9; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+          Update Now
+        </button>
+        <button onclick="this.parentElement.remove()" style="margin-left: 10px; background: transparent; color: white; border: 1px solid white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+          Later
+        </button>
+      `;
+      document.body.appendChild(notification);
+    }
+    
+    // Show refresh notification
+    function showRefreshNotification(message) {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #22c55e;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+      `;
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 3000);
+    }
+    
+    // Refresh the application
+    function refreshApp() {
+      if (serviceWorkerRegistration && serviceWorkerRegistration.waiting) {
+        serviceWorkerRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        window.location.reload();
+      } else {
+        forceRefreshCache();
+        setTimeout(() => window.location.reload(), 1000);
+      }
     }
   </script>
 </body>
