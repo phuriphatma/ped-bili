@@ -54,44 +54,21 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event - serve from cache first, then network
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests
-  if (event.request.method !== 'GET') {
-    return;
-  }
+  if (event.request.method !== 'GET') return;
 
   event.respondWith(
-    caches.match(event.request)
-      .then((cachedResponse) => {
-        if (cachedResponse) {
-          console.log('Service Worker: Serving from cache', event.request.url);
-          return cachedResponse;
-        }
-        
-        // Not in cache, fetch from network
-        console.log('Service Worker: Fetching from network', event.request.url);
-        return fetch(event.request)
-          .then((networkResponse) => {
-            // Don't cache non-successful responses
-            if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-              return networkResponse;
-            }
-
-            // Clone the response as it can only be consumed once
-            const responseToCache = networkResponse.clone();
-
-            // Add to cache for future use
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
-              });
-
-            return networkResponse;
-          })
-          .catch((error) => {
-            console.error('Service Worker: Network fetch failed', error);
-            // Could return a custom offline page here
-            throw error;
-          });
+    fetch(event.request)
+      .then((networkResponse) => {
+        // Save fresh copy in cache
+        const responseToCache = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, responseToCache);
+        });
+        return networkResponse;
+      })
+      .catch(() => {
+        // If offline, fallback to cache
+        return caches.match(event.request);
       })
   );
 });
