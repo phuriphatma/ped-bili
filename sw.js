@@ -1,6 +1,6 @@
 // Service Worker for offline functionality
 // Update this timestamp when deploying new version to force cache refresh on all devices
-const CACHE_VERSION = '2024-08-19-001';
+const CACHE_VERSION = '3';
 const CACHE_NAME = `ped-bili-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   './',
